@@ -651,3 +651,42 @@ resources:
     backend_defaults:
       # The Vector Search API assigns index_subtype when the config omits it
       - field: index_subtype
+
+  secrets:
+    recreate_on_changes:
+      # Secrets are three-level namespace objects (catalog.schema.secret)
+      # and cannot be renamed or moved between schemas
+      - field: catalog_name
+        reason: immutable
+      - field: schema_name
+        reason: immutable
+      - field: name
+        reason: immutable
+    ignore_remote_changes:
+      # These fields are computed by the backend and not settable by the user
+      - field: browse_only
+        reason: output_only
+      - field: create_time
+        reason: output_only
+      - field: created_by
+        reason: output_only
+      - field: effective_owner
+        reason: output_only
+      - field: effective_value
+        reason: output_only
+      - field: external_secret_id
+        reason: output_only
+      - field: full_name
+        reason: output_only
+      - field: metastore_id
+        reason: output_only
+      - field: update_time
+        reason: output_only
+      - field: updated_by
+        reason: output_only
+      # The actual secret value is never stored in state for security reasons.
+      # RemapState always returns empty string for value to prevent persisting
+      # secrets in the deployment state file. Remote changes to the value are
+      # ignored since we can't read the plaintext value back from the API.
+      - field: value
+        reason: security - value not persisted in state

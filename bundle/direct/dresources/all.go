@@ -35,6 +35,7 @@ var SupportedResources = map[string]any{
 	"quality_monitors":        (*ResourceQualityMonitor)(nil),
 	"vector_search_endpoints": (*ResourceVectorSearchEndpoint)(nil),
 	"vector_search_indexes":   (*ResourceVectorSearchIndex)(nil),
+	"secrets":                 (*ResourceSecret)(nil),
 
 	// Permissions
 	"jobs.permissions":                    (*ResourcePermissions)(nil),
@@ -60,6 +61,7 @@ var SupportedResources = map[string]any{
 	"volumes.grants":               (*ResourceGrants)(nil),
 	"registered_models.grants":     (*ResourceGrants)(nil),
 	"vector_search_indexes.grants": (*ResourceGrants)(nil),
+	"secrets.grants":               (*ResourceGrants)(nil),
 }
 
 func InitAll(client *databricks.WorkspaceClient) (map[string]*Adapter, error) {
