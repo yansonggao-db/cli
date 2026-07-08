@@ -176,39 +176,28 @@ func TestAppDoUpdate_UpdateMaskHasAllFields(t *testing.T) {
 func TestAppOverrideChangeDescSourceCodePath(t *testing.T) {
 	r := &ResourceApp{}
 	pathSCP := structpath.MustParsePath("source_code_path")
+	pathOther := structpath.MustParsePath("name")
 
-	t.Run("Skip when remote is empty", func(t *testing.T) {
-		change := &ChangeDesc{Action: deployplan.Update, Old: "/old", New: "/new", Remote: ""}
-		require.NoError(t, r.OverrideChangeDesc(t.Context(), pathSCP, change, nil))
-		assert.Equal(t, deployplan.Skip, change.Action)
-	})
-
-	t.Run(`Skip when remote is "null"`, func(t *testing.T) {
-		change := &ChangeDesc{Action: deployplan.Update, Old: "/old", New: "/new", Remote: "null"}
-		require.NoError(t, r.OverrideChangeDesc(t.Context(), pathSCP, change, nil))
-		assert.Equal(t, deployplan.Skip, change.Action)
-	})
-
-	t.Run("Untouched when remote is a real path", func(t *testing.T) {
-		change := &ChangeDesc{Action: deployplan.Update, Old: "/old", New: "/new", Remote: "/actual"}
-		require.NoError(t, r.OverrideChangeDesc(t.Context(), pathSCP, change, nil))
-		assert.Equal(t, deployplan.Update, change.Action)
-	})
-
-	// Passing a typed nil for the remote param must not panic. Prior to the fix,
-	// the hook dereferenced remote.SourceCodePath, which panics in --local mode
-	// and when the resource does not exist remotely.
-	t.Run("Nil remote param does not panic", func(t *testing.T) {
-		change := &ChangeDesc{Action: deployplan.Update, Old: "/old", New: "/new", Remote: ""}
-		require.NotPanics(t, func() {
-			_ = r.OverrideChangeDesc(t.Context(), pathSCP, change, (*AppRemote)(nil))
+	// Every case passes a typed nil for the raw remote param — this matches what
+	// calladapt delivers when the remote read is skipped in --local mode or the
+	// resource does not exist. If the hook regresses to dereferencing that param,
+	// every row panics.
+	tests := []struct {
+		name       string
+		path       *structpath.PathNode
+		remote     any
+		wantAction deployplan.ActionType
+	}{
+		{"Skip when remote is empty", pathSCP, "", deployplan.Skip},
+		{`Skip when remote is "null"`, pathSCP, "null", deployplan.Skip},
+		{"Untouched when remote is a real path", pathSCP, "/actual", deployplan.Update},
+		{"Other paths untouched", pathOther, "", deployplan.Update},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			change := &ChangeDesc{Action: deployplan.Update, Old: "/old", New: "/new", Remote: tc.remote}
+			require.NoError(t, r.OverrideChangeDesc(t.Context(), tc.path, change, (*AppRemote)(nil)))
+			assert.Equal(t, tc.wantAction, change.Action)
 		})
-	})
-
-	t.Run("Other paths untouched", func(t *testing.T) {
-		pathOther := structpath.MustParsePath("name")
-		change := &ChangeDesc{Action: deployplan.Update, Old: "a", New: "b", Remote: ""}
-		require.NoError(t, r.OverrideChangeDesc(t.Context(), pathOther, change, nil))
-		assert.Equal(t, deployplan.Update, change.Action)
-	})
+	}
 }
