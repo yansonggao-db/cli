@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/databricks/cli/bundle/deployplan"
+	"github.com/databricks/cli/libs/structs/structpath"
 	"github.com/databricks/cli/libs/testserver"
 	"github.com/databricks/databricks-sdk-go"
 	"github.com/databricks/databricks-sdk-go/service/apps"
@@ -169,4 +171,44 @@ func TestAppDoUpdate_UpdateMaskHasAllFields(t *testing.T) {
 	for _, field := range UpdateMaskFields {
 		assert.Contains(t, allFields, field, "field %s is in UpdateMaskFields but not in apps.App struct", field)
 	}
+}
+
+func TestAppOverrideChangeDescSourceCodePath(t *testing.T) {
+	r := &ResourceApp{}
+	pathSCP := structpath.MustParsePath("source_code_path")
+
+	t.Run("Skip when remote is empty", func(t *testing.T) {
+		change := &ChangeDesc{Action: deployplan.Update, Old: "/old", New: "/new", Remote: ""}
+		require.NoError(t, r.OverrideChangeDesc(t.Context(), pathSCP, change, nil))
+		assert.Equal(t, deployplan.Skip, change.Action)
+	})
+
+	t.Run(`Skip when remote is "null"`, func(t *testing.T) {
+		change := &ChangeDesc{Action: deployplan.Update, Old: "/old", New: "/new", Remote: "null"}
+		require.NoError(t, r.OverrideChangeDesc(t.Context(), pathSCP, change, nil))
+		assert.Equal(t, deployplan.Skip, change.Action)
+	})
+
+	t.Run("Untouched when remote is a real path", func(t *testing.T) {
+		change := &ChangeDesc{Action: deployplan.Update, Old: "/old", New: "/new", Remote: "/actual"}
+		require.NoError(t, r.OverrideChangeDesc(t.Context(), pathSCP, change, nil))
+		assert.Equal(t, deployplan.Update, change.Action)
+	})
+
+	// Passing a typed nil for the remote param must not panic. Prior to the fix,
+	// the hook dereferenced remote.SourceCodePath, which panics in --local mode
+	// and when the resource does not exist remotely.
+	t.Run("Nil remote param does not panic", func(t *testing.T) {
+		change := &ChangeDesc{Action: deployplan.Update, Old: "/old", New: "/new", Remote: ""}
+		require.NotPanics(t, func() {
+			_ = r.OverrideChangeDesc(t.Context(), pathSCP, change, (*AppRemote)(nil))
+		})
+	})
+
+	t.Run("Other paths untouched", func(t *testing.T) {
+		pathOther := structpath.MustParsePath("name")
+		change := &ChangeDesc{Action: deployplan.Update, Old: "a", New: "b", Remote: ""}
+		require.NoError(t, r.OverrideChangeDesc(t.Context(), pathOther, change, nil))
+		assert.Equal(t, deployplan.Update, change.Action)
+	})
 }

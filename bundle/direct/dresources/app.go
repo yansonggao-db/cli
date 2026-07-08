@@ -248,8 +248,15 @@ func hasAppChanges(entry *PlanEntry) bool {
 
 // OverrideChangeDesc skips source_code_path drift when the remote value is empty.
 // This happens when an app has no deployment yet (DefaultSourceCodePath is unset).
-func (*ResourceApp) OverrideChangeDesc(_ context.Context, path *structpath.PathNode, change *ChangeDesc, remote *AppRemote) error {
-	if path.String() == "source_code_path" && (remote.SourceCodePath == "" || remote.SourceCodePath == "null") {
+// Read change.Remote rather than the raw remote param: the raw param is a typed
+// nil when the remote read was skipped (--local) or the resource does not exist
+// remotely, so dereferencing it panics.
+func (*ResourceApp) OverrideChangeDesc(_ context.Context, path *structpath.PathNode, change *ChangeDesc, _ *AppRemote) error {
+	if path.String() != "source_code_path" {
+		return nil
+	}
+	remotePath, _ := change.Remote.(string)
+	if remotePath == "" || remotePath == "null" {
 		change.Action = deployplan.Skip
 		change.Reason = "no deployment"
 	}
