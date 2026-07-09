@@ -52,11 +52,11 @@ func (s *Secret) UnmarshalJSON(b []byte) error {
 	return marshal.Unmarshal(b, s)
 }
 
-func (s Secret) MarshalJSON() ([]byte, error) {
+func (s *Secret) MarshalJSON() ([]byte, error) {
 	return marshal.Marshal(s)
 }
 
-func (s Secret) Exists(ctx context.Context, w *databricks.WorkspaceClient, fullName string) (bool, error) {
+func (s *Secret) Exists(ctx context.Context, w *databricks.WorkspaceClient, fullName string) (bool, error) {
 	log.Tracef(ctx, "Checking if secret with fullName=%s exists", fullName)
 
 	_, err := w.SecretsUc.GetSecret(ctx, catalog.GetSecretRequest{

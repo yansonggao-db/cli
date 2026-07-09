@@ -253,6 +253,11 @@ github.com/databricks/cli/bundle/config.Resources:
       The secret scope definitions for the bundle, where each key is the name of the secret scope.
     "markdown_description": |-
       The secret scope definitions for the bundle, where each key is the name of the secret scope. See [\_](/dev-tools/bundles/resources.md#secret_scopes).
+  "secrets":
+    "description": |-
+      The Unity Catalog secret definitions for the bundle, where each key is the name of the secret.
+    "markdown_description": |-
+      The Unity Catalog secret definitions for the bundle, where each key is the name of the secret. See [\_](/dev-tools/bundles/resources.md#secrets).
   "sql_warehouses":
     "description": |-
       The SQL warehouse definitions for the bundle, where each key is the name of the warehouse.
@@ -1012,6 +1017,34 @@ github.com/databricks/cli/bundle/config/resources.PostgresSyncedTable:
   "timeseries_key":
     "description": |-
       PLACEHOLDER
+github.com/databricks/cli/bundle/config/resources.Secret:
+  "catalog_name":
+    "description": |-
+      The name of the catalog where the schema and the secret reside.
+  "comment":
+    "description": |-
+      User-provided free-form text description of the secret.
+  "expire_time":
+    "description": |-
+      User-provided expiration time of the secret. Purely informational; does not trigger automatic actions.
+  "grants":
+    "description": |-
+      The grants to apply on this secret.
+  "lifecycle":
+    "description": |-
+      Lifecycle is a struct that contains the lifecycle settings for a resource. It controls the behavior of the resource when it is deployed or destroyed.
+  "name":
+    "description": |-
+      The name of the secret, relative to its parent schema.
+  "owner":
+    "description": |-
+      The owner of the secret. Defaults to the creating principal on creation.
+  "schema_name":
+    "description": |-
+      The name of the schema where the secret resides.
+  "value":
+    "description": |-
+      The secret value to store. Must be a variable reference (e.g. ${var.my_secret}) to prevent plain-text secrets in configuration files.
 github.com/databricks/cli/bundle/config/resources.SecretScope:
   "backend_type":
     "description": |-

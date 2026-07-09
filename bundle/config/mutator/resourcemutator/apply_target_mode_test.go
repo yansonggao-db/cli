@@ -173,6 +173,13 @@ func mockBundle(mode config.Mode) *bundle.Bundle {
 						Name: "secretScope1",
 					},
 				},
+				Secrets: map[string]*resources.Secret{
+					"secret1": {
+						CatalogName: "main",
+						SchemaName:  "default",
+						Name:        "secret1",
+					},
+				},
 				SqlWarehouses: map[string]*resources.SqlWarehouse{
 					"sql_warehouse1": {
 						CreateWarehouseRequest: sql.CreateWarehouseRequest{
@@ -473,6 +480,7 @@ func TestAppropriateResourcesAreRenamed(t *testing.T) {
 	notUserNamed := []string{
 		"Apps",
 		"SecretScopes",
+		"Secrets",
 		"DatabaseInstances",
 		"DatabaseCatalogs",
 		"SyncedDatabaseTables",

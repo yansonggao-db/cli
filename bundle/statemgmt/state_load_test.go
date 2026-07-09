@@ -54,6 +54,7 @@ func TestStateToBundleEmptyLocalResources(t *testing.T) {
 		"resources.postgres_synced_tables.test_postgres_synced_table":   {ID: "synced_tables/main.public.test_synced_table"},
 		"resources.vector_search_endpoints.test_vector_search_endpoint": {ID: "vs-endpoint-1"},
 		"resources.vector_search_indexes.test_vector_search_index":      {ID: "vs-index-1"},
+		"resources.secrets.test_secret":                                 {ID: "main.default.test_secret"},
 	}
 	err := StateToBundle(t.Context(), state, &config)
 	assert.NoError(t, err)
@@ -133,6 +134,9 @@ func TestStateToBundleEmptyLocalResources(t *testing.T) {
 
 	assert.Equal(t, "vs-index-1", config.Resources.VectorSearchIndexes["test_vector_search_index"].ID)
 	assert.Equal(t, resources.ModifiedStatusDeleted, config.Resources.VectorSearchIndexes["test_vector_search_index"].ModifiedStatus)
+
+	assert.Equal(t, "main.default.test_secret", config.Resources.Secrets["test_secret"].ID)
+	assert.Equal(t, resources.ModifiedStatusDeleted, config.Resources.Secrets["test_secret"].ModifiedStatus)
 
 	AssertFullResourceCoverage(t, &config)
 }
@@ -249,6 +253,13 @@ func TestStateToBundleEmptyRemoteResources(t *testing.T) {
 			SecretScopes: map[string]*resources.SecretScope{
 				"test_secret_scope": {
 					Name: "test_secret_scope",
+				},
+			},
+			Secrets: map[string]*resources.Secret{
+				"test_secret": {
+					CatalogName: "main",
+					SchemaName:  "default",
+					Name:        "test_secret",
 				},
 			},
 			SqlWarehouses: map[string]*resources.SqlWarehouse{
@@ -393,6 +404,9 @@ func TestStateToBundleEmptyRemoteResources(t *testing.T) {
 
 	assert.Empty(t, config.Resources.SecretScopes["test_secret_scope"].ID)
 	assert.Equal(t, resources.ModifiedStatusCreated, config.Resources.SecretScopes["test_secret_scope"].ModifiedStatus)
+
+	assert.Empty(t, config.Resources.Secrets["test_secret"].ID)
+	assert.Equal(t, resources.ModifiedStatusCreated, config.Resources.Secrets["test_secret"].ModifiedStatus)
 
 	assert.Empty(t, config.Resources.SqlWarehouses["test_sql_warehouse"].ID)
 	assert.Equal(t, resources.ModifiedStatusCreated, config.Resources.SqlWarehouses["test_sql_warehouse"].ModifiedStatus)
@@ -617,6 +631,18 @@ func TestStateToBundleModifiedResources(t *testing.T) {
 					Name: "test_secret_scope_new",
 				},
 			},
+			Secrets: map[string]*resources.Secret{
+				"test_secret": {
+					CatalogName: "main",
+					SchemaName:  "default",
+					Name:        "test_secret",
+				},
+				"test_secret_new": {
+					CatalogName: "main",
+					SchemaName:  "default",
+					Name:        "test_secret_new",
+				},
+			},
 			SqlWarehouses: map[string]*resources.SqlWarehouse{
 				"test_sql_warehouse": {
 					CreateWarehouseRequest: sql.CreateWarehouseRequest{
@@ -817,6 +843,8 @@ func TestStateToBundleModifiedResources(t *testing.T) {
 		"resources.vector_search_endpoints.test_vector_search_endpoint_old": {ID: "vs-endpoint-old"},
 		"resources.vector_search_indexes.test_vector_search_index":          {ID: "vs-index-1"},
 		"resources.vector_search_indexes.test_vector_search_index_old":      {ID: "vs-index-old"},
+		"resources.secrets.test_secret":                                     {ID: "main.default.test_secret"},
+		"resources.secrets.test_secret_old":                                 {ID: "main.default.test_secret_old"},
 	}
 	err := StateToBundle(t.Context(), state, &config)
 	assert.NoError(t, err)
@@ -990,6 +1018,13 @@ func TestStateToBundleModifiedResources(t *testing.T) {
 	assert.Equal(t, resources.ModifiedStatusDeleted, config.Resources.VectorSearchIndexes["test_vector_search_index_old"].ModifiedStatus)
 	assert.Empty(t, config.Resources.VectorSearchIndexes["test_vector_search_index_new"].ID)
 	assert.Equal(t, resources.ModifiedStatusCreated, config.Resources.VectorSearchIndexes["test_vector_search_index_new"].ModifiedStatus)
+
+	assert.Equal(t, "main.default.test_secret", config.Resources.Secrets["test_secret"].ID)
+	assert.Empty(t, config.Resources.Secrets["test_secret"].ModifiedStatus)
+	assert.Equal(t, "main.default.test_secret_old", config.Resources.Secrets["test_secret_old"].ID)
+	assert.Equal(t, resources.ModifiedStatusDeleted, config.Resources.Secrets["test_secret_old"].ModifiedStatus)
+	assert.Empty(t, config.Resources.Secrets["test_secret_new"].ID)
+	assert.Equal(t, resources.ModifiedStatusCreated, config.Resources.Secrets["test_secret_new"].ModifiedStatus)
 
 	AssertFullResourceCoverage(t, &config)
 }
