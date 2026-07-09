@@ -19,6 +19,7 @@ func TestConvertLifecycleForAllResources(t *testing.T) {
 		"external_locations",
 		"genie_spaces",
 		"secrets",
+		"job_runs",
 		"vector_search_endpoints",
 		"vector_search_indexes",
 	}
