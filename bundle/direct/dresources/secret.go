@@ -35,17 +35,15 @@ func (*ResourceSecret) PrepareState(input *resources.Secret) *catalog.Secret {
 		Comment:         input.Comment,
 		Owner:           input.Owner,
 		ExpireTime:      expireTime,
-		BrowseOnly:       false,
-		CreateTime:       nil,
-		CreatedBy:        "",
-		EffectiveOwner:   "",
-		EffectiveValue:   "",
-		ExternalSecretId: "",
-		FullName:         "",
-		MetastoreId:      "",
-		UpdateTime:       nil,
-		UpdatedBy:        "",
-		ForceSendFields:  nil,
+		CreateTime:      nil,
+		CreatedBy:       "",
+		EffectiveOwner:  "",
+		EffectiveValue:  "",
+		FullName:        "",
+		MetastoreId:     "",
+		UpdateTime:      nil,
+		UpdatedBy:       "",
+		ForceSendFields: nil,
 	}
 }
 
@@ -55,33 +53,29 @@ func (*ResourceSecret) RemapState(remote *catalog.Secret) *catalog.Secret {
 	// and we should not persist secrets in the deployment state file.
 	// We store an empty value and rely on update_time changes to detect drift.
 	return &catalog.Secret{
-		CatalogName:      remote.CatalogName,
-		SchemaName:       remote.SchemaName,
-		Name:             remote.Name,
-		Value:            "", // Never store actual secret value in state
-		Comment:          remote.Comment,
-		Owner:            remote.Owner,
-		ExpireTime:       remote.ExpireTime,
-		BrowseOnly:       false,
-		CreateTime:       nil,
-		CreatedBy:        "",
-		EffectiveOwner:   "",
-		EffectiveValue:   "",
-		ExternalSecretId: "",
-		FullName:         "",
-		MetastoreId:      "",
-		UpdateTime:       nil,
-		UpdatedBy:        "",
-		ForceSendFields:  utils.FilterFields[catalog.Secret](remote.ForceSendFields),
+		CatalogName:     remote.CatalogName,
+		SchemaName:      remote.SchemaName,
+		Name:            remote.Name,
+		Value:           "", // Never store actual secret value in state
+		Comment:         remote.Comment,
+		Owner:           remote.Owner,
+		ExpireTime:      remote.ExpireTime,
+		CreateTime:      nil,
+		CreatedBy:       "",
+		EffectiveOwner:  "",
+		EffectiveValue:  "",
+		FullName:        "",
+		MetastoreId:     "",
+		UpdateTime:      nil,
+		UpdatedBy:       "",
+		ForceSendFields: utils.FilterFields[catalog.Secret](remote.ForceSendFields),
 	}
 }
 
 // DoRead fetches the secret by full name.
 func (r *ResourceSecret) DoRead(ctx context.Context, id string) (*catalog.Secret, error) {
 	return r.client.SecretsUc.GetSecret(ctx, catalog.GetSecretRequest{
-		FullName:        id,
-		IncludeBrowse:   false,
-		ForceSendFields: nil,
+		FullName: id,
 	})
 }
 

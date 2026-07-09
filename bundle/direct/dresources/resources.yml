@@ -786,8 +786,6 @@ resources:
         reason: immutable
     ignore_remote_changes:
       # These fields are computed by the backend and not settable by the user
-      - field: browse_only
-        reason: output_only
       - field: create_time
         reason: output_only
       - field: created_by
@@ -795,8 +793,6 @@ resources:
       - field: effective_owner
         reason: output_only
       - field: effective_value
-        reason: output_only
-      - field: external_secret_id
         reason: output_only
       - field: full_name
         reason: output_only
