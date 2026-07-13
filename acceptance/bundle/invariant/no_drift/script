@@ -43,7 +43,7 @@ cat LOG.deploy | contains.py '!panic' '!internal error' > /dev/null
 echo INPUT_CONFIG_OK
 
 # Check both text and JSON plan for no changes.
-# LOCAL_DIFF is either empty or "--local"; with --local the plan ignores the remote
+# LOCAL_DIFF is either empty or "--plan-mode=local"; the local mode ignores the remote
 # state of resources, so no drift means the local state saved by deploy matches config.
 # Note, expect that there maybe more than one resource unchanged
 $CLI bundle plan $LOCAL_DIFF -o json > LOG.planjson 2>LOG.planjson.err
