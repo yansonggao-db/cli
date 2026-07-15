@@ -120,6 +120,11 @@ func (v Value) AsAny() any {
 	case KindNil:
 		return v.v
 	case KindString:
+		// secretString holds a sensitive value; return the redaction placeholder.
+		if ss, ok := v.v.(secretString); ok {
+			_ = ss
+			return SensitiveValueRedacted
+		}
 		return v.v
 	case KindBool:
 		return v.v

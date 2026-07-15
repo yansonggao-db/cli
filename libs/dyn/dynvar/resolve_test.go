@@ -393,3 +393,33 @@ func TestResolveSequenceVariable(t *testing.T) {
 	assert.Equal(t, "value1", seq[0].MustString())
 	assert.Equal(t, "value2", seq[1].MustString())
 }
+
+func TestResolveSensitivePureSubstitution(t *testing.T) {
+	in := dyn.V(map[string]dyn.Value{
+		"secret": dyn.NewSensitiveValue("s3cr3t", nil),
+		"ref":    dyn.V("${secret}"),
+	})
+
+	out, err := dynvar.Resolve(in, dynvar.DefaultLookup(in))
+	require.NoError(t, err)
+
+	ref := getByPath(t, out, "ref")
+	assert.True(t, ref.IsSensitive(), "pure substitution of sensitive value must be sensitive")
+	assert.Equal(t, "s3cr3t", ref.MustString(), "MustString must return the real value")
+	assert.Equal(t, dyn.SensitiveValueRedacted, ref.AsAny(), "AsAny must return the redaction placeholder")
+}
+
+func TestResolveSensitiveStringInterpolation(t *testing.T) {
+	in := dyn.V(map[string]dyn.Value{
+		"secret": dyn.NewSensitiveValue("s3cr3t", nil),
+		"ref":    dyn.V("prefix-${secret}-suffix"),
+	})
+
+	out, err := dynvar.Resolve(in, dynvar.DefaultLookup(in))
+	require.NoError(t, err)
+
+	ref := getByPath(t, out, "ref")
+	assert.True(t, ref.IsSensitive(), "string interpolation containing a sensitive value must be sensitive")
+	// The real interpolated string is still accessible.
+	assert.Equal(t, "prefix-s3cr3t-suffix", ref.MustString())
+}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/databricks/cli/libs/dyn"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStructInfoPlain(t *testing.T) {
@@ -225,4 +226,79 @@ func TestStructInfoValueFieldMultiple(t *testing.T) {
 	assert.Panics(t, func() {
 		getStructInfo(reflect.TypeFor[Tmp]())
 	})
+}
+
+func TestStructInfoSensitivePlain(t *testing.T) {
+	type Tmp struct {
+		Name  string `json:"name"`
+		Token string `json:"token" bundle:"sensitive"`
+	}
+
+	si := getStructInfo(reflect.TypeFor[Tmp]())
+	assert.True(t, si.Sensitive["token"])
+	assert.False(t, si.Sensitive["name"])
+}
+
+func TestStructInfoSensitiveEmbeddedByValue(t *testing.T) {
+	type Inner struct {
+		Token string `json:"token" bundle:"sensitive"`
+	}
+	type Outer struct {
+		Name string `json:"name"`
+		Inner
+	}
+
+	si := getStructInfo(reflect.TypeFor[Outer]())
+	assert.True(t, si.Sensitive["token"])
+	assert.False(t, si.Sensitive["name"])
+}
+
+func TestStructInfoSensitiveEmbeddedByPointer(t *testing.T) {
+	type Inner struct {
+		Token string `json:"token" bundle:"sensitive"`
+	}
+	type Outer struct {
+		Name string `json:"name"`
+		*Inner
+	}
+
+	si := getStructInfo(reflect.TypeFor[Outer]())
+	assert.True(t, si.Sensitive["token"])
+}
+
+func TestStructInfoSensitiveTopLevelPrecedence(t *testing.T) {
+	// A non-sensitive top-level field shadows a sensitive embedded field.
+	type Inner struct {
+		Token string `json:"token" bundle:"sensitive"`
+	}
+	type Outer struct {
+		Token string `json:"token"` // not sensitive; shadows Inner.Token
+		Inner
+	}
+
+	si := getStructInfo(reflect.TypeFor[Outer]())
+	assert.False(t, si.Sensitive["token"])
+}
+
+func TestFromTypedSensitiveField(t *testing.T) {
+	type Resource struct {
+		Name  string `json:"name"`
+		Token string `json:"token" bundle:"sensitive"`
+	}
+
+	src := Resource{Name: "my-resource", Token: "s3cr3t"}
+	v, err := FromTyped(src, dyn.NilValue)
+	require.NoError(t, err)
+
+	tok, err := dyn.GetByPath(v, dyn.NewPath(dyn.Key("token")))
+	require.NoError(t, err)
+	assert.True(t, tok.IsSensitive(), "token field should be sensitive")
+	assert.Equal(t, "s3cr3t", tok.MustString(), "MustString should return the real value")
+	assert.Equal(t, dyn.SensitiveValueRedacted, tok.AsAny(), "AsAny should return the redacted placeholder")
+
+	// Non-sensitive fields are unaffected.
+	name, err := dyn.GetByPath(v, dyn.NewPath(dyn.Key("name")))
+	require.NoError(t, err)
+	assert.False(t, name.IsSensitive())
+	assert.Equal(t, "my-resource", name.MustString())
 }

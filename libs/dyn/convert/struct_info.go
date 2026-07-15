@@ -28,6 +28,10 @@ type structInfo struct {
 	// Maps JSON-name of the field to Golang struct name
 	GolangNames map[string]string
 
+	// Sensitive tracks fields tagged `bundle:"sensitive"` by their JSON name.
+	// Values for these fields should be masked in display output.
+	Sensitive map[string]bool
+
 	// ForceSendFieldsIndex maps the JSON-name of the field to the index path (for
 	// use with [reflect.Value.FieldByIndex]) of the ForceSendFields slice that
 	// governs it: the one declared by the struct that also declares the field.
@@ -67,6 +71,7 @@ func buildStructInfo(typ reflect.Type) structInfo {
 		Fields:               make(map[string][]int),
 		ForceEmpty:           make(map[string]bool),
 		GolangNames:          make(map[string]string),
+		Sensitive:            make(map[string]bool),
 		ForceSendFieldsIndex: make(map[string][]int),
 	}
 
@@ -133,6 +138,11 @@ func buildStructInfo(typ reflect.Type) structInfo {
 				out.ForceEmpty[name] = true
 			}
 			out.GolangNames[name] = sf.Name
+
+			btag := structtag.BundleTag(sf.Tag.Get("bundle"))
+			if btag.Sensitive() {
+				out.Sensitive[name] = true
+			}
 
 			// The field is declared directly in this struct, so it is governed by
 			// this struct's ForceSendFields (if it has one).

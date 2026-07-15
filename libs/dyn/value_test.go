@@ -89,3 +89,35 @@ func TestIsZero(t *testing.T) {
 	assert.True(t, dyn.V([]dyn.Value{}).IsZero(), "Sequence")
 	assert.False(t, dyn.V([]dyn.Value{dyn.V(0)}).IsZero(), "Sequence")
 }
+
+func TestSensitiveValue(t *testing.T) {
+	v := dyn.NewSensitiveValue("s3cr3t", nil)
+
+	// Kind is still KindString.
+	assert.Equal(t, dyn.KindString, v.Kind())
+
+	// IsSensitive detects the wrapper.
+	assert.True(t, v.IsSensitive())
+
+	// AsString / MustString return the real value.
+	s, ok := v.AsString()
+	assert.True(t, ok)
+	assert.Equal(t, "s3cr3t", s)
+	assert.Equal(t, "s3cr3t", v.MustString())
+
+	// AsAny returns the redaction placeholder.
+	assert.Equal(t, dyn.SensitiveValueRedacted, v.AsAny())
+}
+
+func TestPlainStringNotSensitive(t *testing.T) {
+	v := dyn.V("hello")
+	assert.False(t, v.IsSensitive())
+	assert.Equal(t, "hello", v.AsAny())
+}
+
+func TestSensitivePreservedByWithLocations(t *testing.T) {
+	locs := []dyn.Location{{File: "f", Line: 1}}
+	v := dyn.NewSensitiveValue("s3cr3t", nil).WithLocations(locs)
+	assert.True(t, v.IsSensitive())
+	assert.Equal(t, locs, v.Locations())
+}

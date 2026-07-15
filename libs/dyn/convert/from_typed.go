@@ -133,6 +133,15 @@ func fromTypedStruct(src reflect.Value, ref dyn.Value, options ...fromTypedOptio
 			return dyn.InvalidValue, err
 		}
 
+		// If the field carries the bundle:"sensitive" tag and resolved to a
+		// non-empty string, wrap it as a sensitive value so that all downstream
+		// serializers (JSON, YAML) redact it automatically.
+		if info.Sensitive[k] && nv.Kind() == dyn.KindString {
+			if s, ok := nv.AsString(); ok && s != "" {
+				nv = dyn.NewSensitiveValue(s, nv.Locations())
+			}
+		}
+
 		// Either if the key was set in the reference, the field is not zero-valued, OR it's forced
 		if ok || nv.Kind() != dyn.KindNil || isForced {
 			// If v isZero, it could be because it's a variable reference; so we check that nv is zero as well
