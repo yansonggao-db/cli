@@ -1,5 +1,5 @@
 preflight  ok  check
-resolve    error  resolving cluster name "dup": get cluster by name "dup": there are 2 instances of ClusterDetails named 'dup'
+resolve    error  resolving cluster name "dup": there are 2 active clusters named "dup"; use --cluster-id to disambiguate
 fetch      pending
 merge      pending
 provision  pending
