@@ -93,10 +93,11 @@ func TestResolveBundleNothingSelected(t *testing.T) {
 }
 
 func TestResolveBundleServerless(t *testing.T) {
+	// The bundle records serverless but no version, so the default stand-in applies.
 	ti, err := ResolveTarget(t.Context(), TargetFlags{}, stubCompute{}, BundleTarget{Selected: true, Serverless: true})
 	require.NoError(t, err)
 	assert.Equal(t, "bundle", ti.Source)
-	assert.Equal(t, "serverless/serverless-v4", ti.EnvKey)
+	assert.Equal(t, "serverless/serverless-"+defaultServerlessVersion, ti.EnvKey)
 }
 
 // jobStubCompute returns distinct values for the first (sparkVersion) and third
@@ -143,13 +144,13 @@ func TestResolveJobServerlessUsesRecordedVersion(t *testing.T) {
 	assert.Equal(t, "serverless/serverless-v3", ti.EnvKey)
 }
 
-func TestResolveJobServerlessEmptyVersionFallsBackToV4(t *testing.T) {
-	// When the job records no serverless version, ResolveTarget defaults to v4
-	// (documented stand-in), matching the bundle serverless path.
+func TestResolveJobServerlessEmptyVersionFallsBackToDefault(t *testing.T) {
+	// When the job records no serverless version, ResolveTarget uses the default
+	// stand-in, matching the bundle serverless path.
 	c := jobStubCompute{isServerless: true, version: ""}
 	ti, err := ResolveTarget(t.Context(), TargetFlags{Job: "42"}, c, BundleTarget{})
 	require.NoError(t, err)
-	assert.Equal(t, "serverless/serverless-v4", ti.EnvKey)
+	assert.Equal(t, "serverless/serverless-"+defaultServerlessVersion, ti.EnvKey)
 }
 
 func TestValidateTargetFlagsMutuallyExclusive(t *testing.T) {
