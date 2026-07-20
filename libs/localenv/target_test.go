@@ -37,6 +37,24 @@ func TestResolveServerlessFlag(t *testing.T) {
 	assert.Equal(t, "serverless/serverless-v4", ti.EnvKey)
 }
 
+func TestResolveServerlessFlagBareNumber(t *testing.T) {
+	// The documented input is a bare number; it normalizes to the vN env key.
+	ti, err := ResolveTarget(t.Context(), TargetFlags{Serverless: "5"}, stubCompute{}, BundleTarget{})
+	require.NoError(t, err)
+	assert.Equal(t, "serverless/serverless-v5", ti.EnvKey)
+}
+
+func TestResolveServerlessFlagRejectsMalformed(t *testing.T) {
+	// Malformed values fail fast at resolve (E_RESOLVE) rather than resolving to
+	// a bogus env key that only 404s at fetch.
+	for _, bad := range []string{"vv5", "v", " 5", "5x", "latest"} {
+		_, err := ResolveTarget(t.Context(), TargetFlags{Serverless: bad}, stubCompute{}, BundleTarget{})
+		var pe *PipelineError
+		require.ErrorAs(t, err, &pe, "input %q should error", bad)
+		assert.Equal(t, ErrResolve, pe.Code, "input %q", bad)
+	}
+}
+
 func TestResolveClusterFlag(t *testing.T) {
 	c := stubCompute{clusterVersion: "15.4.x-scala2.12"}
 	ti, err := ResolveTarget(t.Context(), TargetFlags{Cluster: "abc"}, c, BundleTarget{})
@@ -97,7 +115,7 @@ func TestResolveBundleServerless(t *testing.T) {
 	ti, err := ResolveTarget(t.Context(), TargetFlags{}, stubCompute{}, BundleTarget{Selected: true, Serverless: true})
 	require.NoError(t, err)
 	assert.Equal(t, "bundle", ti.Source)
-	assert.Equal(t, "serverless/serverless-"+defaultServerlessVersion, ti.EnvKey)
+	assert.Equal(t, "serverless/serverless-v5", ti.EnvKey)
 }
 
 // jobStubCompute returns distinct values for the first (sparkVersion) and third
@@ -150,7 +168,7 @@ func TestResolveJobServerlessEmptyVersionFallsBackToDefault(t *testing.T) {
 	c := jobStubCompute{isServerless: true, version: ""}
 	ti, err := ResolveTarget(t.Context(), TargetFlags{Job: "42"}, c, BundleTarget{})
 	require.NoError(t, err)
-	assert.Equal(t, "serverless/serverless-"+defaultServerlessVersion, ti.EnvKey)
+	assert.Equal(t, "serverless/serverless-v5", ti.EnvKey)
 }
 
 func TestValidateTargetFlagsMutuallyExclusive(t *testing.T) {
