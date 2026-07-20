@@ -126,17 +126,16 @@ func TestCheckBundleConvertibleAllowsEnvVars(t *testing.T) {
 	assert.NoError(t, checkBundleConvertible(cfg))
 }
 
-func TestCheckBundleConvertibleRejectsCodeSourcePathCommand(t *testing.T) {
-	// A command that reads $CODE_SOURCE_PATH assumes the air run harness a bundle
-	// doesn't provide; the gate must still reject it with an actionable message.
+func TestCheckBundleConvertibleAllowsCodeSourcePathCommand(t *testing.T) {
+	// The code snapshot is extracted to $CODE_SOURCE_PATH on the node, so a command
+	// that reads it is now representable — the gate must not reject it.
 	cfg := &runConfig{
 		ExperimentName: "exp",
 		Command:        new("cd $CODE_SOURCE_PATH && python train.py"),
 		Compute:        &computeConfig{AcceleratorType: "GPU_1xA10", NumAccelerators: 1},
+		CodeSource:     &codeSourceConfig{Type: "snapshot", Snapshot: &snapshotSourceConfig{RootPath: "src"}},
 	}
-	err := checkBundleConvertible(cfg)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), codeSourcePathVar)
+	assert.NoError(t, checkBundleConvertible(cfg))
 }
 
 func TestCheckBundleConvertibleCodeSource(t *testing.T) {
@@ -148,7 +147,7 @@ func TestCheckBundleConvertibleCodeSource(t *testing.T) {
 		}
 	}
 
-	// A plain working-tree snapshot is convertible: it uploads via immutable folder.
+	// A plain working-tree snapshot is convertible: the aicode mutator tarballs it.
 	ok := base()
 	ok.CodeSource = &codeSourceConfig{Type: "snapshot", Snapshot: &snapshotSourceConfig{RootPath: "."}}
 	assert.NoError(t, checkBundleConvertible(ok))
@@ -169,9 +168,11 @@ func TestCheckBundleConvertibleCodeSource(t *testing.T) {
 }
 
 func TestStageCodeSource(t *testing.T) {
-	// A working-tree snapshot copies the tree into the bundle root; include_paths
-	// restricts to the named subpaths.
-	src := t.TempDir()
+	// A working-tree snapshot copies the tree into a <dirName> subdir of the bundle
+	// root (dirName = basename of root_path); include_paths restricts to the named
+	// subpaths.
+	src := filepath.Join(t.TempDir(), "src")
+	require.NoError(t, os.MkdirAll(src, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(src, "train.py"), []byte("print()"), 0o644))
 	require.NoError(t, os.MkdirAll(filepath.Join(src, "pkg"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(src, "pkg", "mod.py"), []byte("x=1"), 0o644))
@@ -181,25 +182,26 @@ func TestStageCodeSource(t *testing.T) {
 		dst := t.TempDir()
 		snap := &snapshotSourceConfig{RootPath: src}
 		require.NoError(t, stageCodeSource(t.Context(), snap, "train.yaml", dst))
-		assert.FileExists(t, filepath.Join(dst, "train.py"))
-		assert.FileExists(t, filepath.Join(dst, "pkg", "mod.py"))
-		assert.FileExists(t, filepath.Join(dst, "ignore.txt"))
+		code := filepath.Join(dst, "src")
+		assert.FileExists(t, filepath.Join(code, "train.py"))
+		assert.FileExists(t, filepath.Join(code, "pkg", "mod.py"))
+		assert.FileExists(t, filepath.Join(code, "ignore.txt"))
 	})
 
 	t.Run("include_paths only", func(t *testing.T) {
 		dst := t.TempDir()
 		snap := &snapshotSourceConfig{RootPath: src, IncludePaths: []string{"train.py", "pkg"}}
 		require.NoError(t, stageCodeSource(t.Context(), snap, "train.yaml", dst))
-		assert.FileExists(t, filepath.Join(dst, "train.py"))
-		assert.FileExists(t, filepath.Join(dst, "pkg", "mod.py"))
-		assert.NoFileExists(t, filepath.Join(dst, "ignore.txt"))
+		code := filepath.Join(dst, "src")
+		assert.FileExists(t, filepath.Join(code, "train.py"))
+		assert.FileExists(t, filepath.Join(code, "pkg", "mod.py"))
+		assert.NoFileExists(t, filepath.Join(code, "ignore.txt"))
 	})
 }
 
 func TestRenderBundleIncludesTargetsAndConvertGate(t *testing.T) {
 	// renderBundle (what --dry-run shows and what the run path deploys) must include
-	// the converted job, the appended dev targets block, and the immutable_folder
-	// flag that routes deploy through the content-addressed snapshot path.
+	// the converted job and the appended dev targets block.
 	cfg := &runConfig{
 		ExperimentName: "exp",
 		Command:        new("python train.py"),
@@ -212,14 +214,15 @@ func TestRenderBundleIncludesTargetsAndConvertGate(t *testing.T) {
 	assert.Contains(t, out, "FOO: bar")
 	assert.Contains(t, out, "targets:")
 	assert.Contains(t, out, "mode: development")
-	assert.Contains(t, out, "immutable_folder: true")
+	assert.NotContains(t, out, "immutable_folder")
 
-	// The convertibility gate still applies: an unconvertible config errors instead
-	// of rendering a lossy bundle.
+	// The convertibility gate still applies: an unconvertible config (git-pinned
+	// code_source) errors instead of rendering a lossy bundle.
 	bad := &runConfig{
 		ExperimentName: "exp",
-		Command:        new("cd $CODE_SOURCE_PATH && python train.py"),
+		Command:        new("python train.py"),
 		Compute:        &computeConfig{AcceleratorType: "GPU_1xA10", NumAccelerators: 1},
+		CodeSource:     &codeSourceConfig{Type: "snapshot", Snapshot: &snapshotSourceConfig{RootPath: "src", Git: &gitRef{Commit: new("abc123")}}},
 	}
 	_, err = renderBundle(bad, "train.yaml")
 	require.Error(t, err)

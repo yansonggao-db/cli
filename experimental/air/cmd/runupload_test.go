@@ -64,9 +64,10 @@ func TestBuildArtifacts_CommandAndConfig(t *testing.T) {
 }
 
 func TestCommandScript(t *testing.T) {
-	// Prepends a cd to the script's own directory so relative refs resolve against
-	// the synced code_source location.
-	assert.Equal(t, "cd \"$(dirname \"$0\")\"\npython train.py", commandScript("python train.py"))
+	// With a code_source, cd to $CODE_SOURCE_PATH (the extracted tarball dir).
+	assert.Equal(t, "cd \"$CODE_SOURCE_PATH\"\npython train.py", commandScript("python train.py", true))
+	// Without one, cd to command.sh's own directory (the only place code can live).
+	assert.Equal(t, "cd \"$(dirname \"$0\")\"\npython train.py", commandScript("python train.py", false))
 }
 
 func TestBuildArtifacts_InlineRequirementsAndParameters(t *testing.T) {

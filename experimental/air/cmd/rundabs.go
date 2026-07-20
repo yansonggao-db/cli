@@ -107,11 +107,10 @@ func renderBundle(cfg *runConfig, configPath string) (string, error) {
 	return string(body) + bundleTargetsBlock(), nil
 }
 
-// writeBundleProject renders databricks.yml plus the launch artifacts the AI Runtime
-// harness reads (command.sh, training_config.yaml, requirements.yaml, and — when
-// present — hyperparameters.yaml and env-var sidecars) and, for a code_source
-// snapshot, the user's code tree, into a temp bundle root. Deploy uploads the whole
-// root as an immutable-folder snapshot. Returns the root and a cleanup func.
+// writeBundleProject renders databricks.yml plus the launch artifacts (command.sh,
+// training_config.yaml, requirements.yaml, hyperparameters.yaml, env-var sidecars)
+// at the bundle root and, for a code_source snapshot, the user's code tree under a
+// <dirName> subdir, into a temp bundle root. Returns the root and a cleanup func.
 func writeBundleProject(ctx context.Context, cfg *runConfig, configPath string) (string, func(), error) {
 	body, err := renderBundle(cfg, configPath)
 	if err != nil {
@@ -127,8 +126,8 @@ func writeBundleProject(ctx context.Context, cfg *runConfig, configPath string) 
 	}
 	cleanup := func() { _ = os.RemoveAll(bundleRoot) }
 
-	// Copy the code_source working tree first, so a stray command.sh / databricks.yml
-	// in the user's tree can't shadow the generated files written below.
+	// Stage the code tree under its own <dirName> subdir, separate from the
+	// bundle-root command.sh / databricks.yml / sidecars.
 	if cfg.CodeSource != nil && cfg.CodeSource.Snapshot != nil {
 		if err := stageCodeSource(ctx, cfg.CodeSource.Snapshot, configPath, bundleRoot); err != nil {
 			cleanup()
@@ -152,21 +151,21 @@ func writeBundleProject(ctx context.Context, cfg *runConfig, configPath string) 
 	return bundleRoot, cleanup, nil
 }
 
-// stageCodeSource copies the snapshot's working tree into dest so deploy uploads it
-// as part of the immutable-folder snapshot. When include_paths is set, only those
-// paths (files or directories, relative to root_path) are copied; otherwise the
-// whole tree is copied. checkBundleConvertible has already rejected git and
-// remote_volume snapshots, so this only handles the local working tree.
+// stageCodeSource copies the snapshot's working tree into a <dirName> subdir of the
+// bundle root (dirName = basename of root_path), which the aicode mutator packages
+// into the code tarball. When include_paths is set, only those paths are copied.
+// checkBundleConvertible has already rejected git and remote_volume snapshots.
 func stageCodeSource(ctx context.Context, snap *snapshotSourceConfig, configPath, dest string) error {
 	root, err := resolveRootPath(ctx, snap.RootPath, filepath.Dir(configPath))
 	if err != nil {
 		return err
 	}
+	codeDir := filepath.Join(dest, dirNameForRoot(snap.RootPath))
 	if len(snap.IncludePaths) == 0 {
-		return copyTree(root, dest)
+		return copyTree(root, codeDir)
 	}
 	for _, rel := range snap.IncludePaths {
-		if err := copyTree(filepath.Join(root, rel), filepath.Join(dest, rel)); err != nil {
+		if err := copyTree(filepath.Join(root, rel), filepath.Join(codeDir, rel)); err != nil {
 			return err
 		}
 	}

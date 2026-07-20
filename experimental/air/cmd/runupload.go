@@ -67,9 +67,10 @@ func buildArtifacts(cfg *runConfig, configPath string) ([]uploadItem, error) {
 			float64(len(configData))/(1024*1024), maxConfigYAMLBytes/(1024*1024))
 	}
 
+	hasCodeSource := cfg.CodeSource != nil && cfg.CodeSource.Snapshot != nil
 	items := []uploadItem{
 		{trainingConfigName, configData},
-		{commandScriptName, []byte(commandScript(*cfg.Command))},
+		{commandScriptName, []byte(commandScript(*cfg.Command, hasCodeSource))},
 	}
 
 	// Always upload requirements.yaml; the server launcher aborts if it's absent.
@@ -131,10 +132,13 @@ func buildArtifacts(cfg *runConfig, configPath string) ([]uploadItem, error) {
 	return items, nil
 }
 
-// commandScript runs the user's command from command.sh's own directory, where the
-// synced code_source files live. The harness invokes command.sh from an unrelated
-// work dir, so relative references (e.g. `python train.py`) would otherwise fail.
-func commandScript(command string) string {
+// commandScript prepends a cd so relative references resolve: to $CODE_SOURCE_PATH
+// (the extracted code tarball) when a code_source is present, else to command.sh's
+// own directory. The harness invokes command.sh from an unrelated work dir.
+func commandScript(command string, hasCodeSource bool) string {
+	if hasCodeSource {
+		return `cd "$CODE_SOURCE_PATH"` + "\n" + command
+	}
 	return `cd "$(dirname "$0")"` + "\n" + command
 }
 

@@ -28,7 +28,7 @@ func TestWriteBundleProject(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join(root, "databricks.yml"))
 	require.NoError(t, err)
 	assert.Contains(t, string(body), "ai_runtime_task:")
-	assert.Contains(t, string(body), "immutable_folder: true")
+	assert.NotContains(t, string(body), "immutable_folder")
 	assert.Contains(t, string(body), "mode: development")
 
 	// The launch artifacts the AI Runtime harness reads are staged next to command.sh.
@@ -36,7 +36,8 @@ func TestWriteBundleProject(t *testing.T) {
 	assert.FileExists(t, filepath.Join(root, trainingConfigName))
 	script, err := os.ReadFile(filepath.Join(root, bundleCommandScript))
 	require.NoError(t, err)
-	assert.Equal(t, commandScript("python train.py"), string(script))
+	// No code_source: command.sh cd's to its own directory.
+	assert.Equal(t, commandScript("python train.py", false), string(script))
 
 	// cleanup removes the temp root.
 	cleanup()
@@ -45,9 +46,9 @@ func TestWriteBundleProject(t *testing.T) {
 }
 
 func TestWriteBundleProjectStagesCodeSource(t *testing.T) {
-	src := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(src, "train.py"), []byte("print()"), 0o644))
+	src := filepath.Join(t.TempDir(), "src")
 	require.NoError(t, os.MkdirAll(filepath.Join(src, "pkg"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(src, "train.py"), []byte("print()"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(src, "pkg", "mod.py"), []byte("x=1"), 0o644))
 
 	configPath := writeConfigFile(t, "train.yaml", minimalConfig+`
@@ -63,17 +64,27 @@ code_source:
 	require.NoError(t, err)
 	defer cleanup()
 
-	// The user's tree is copied into the bundle root alongside our generated files.
-	assert.FileExists(t, filepath.Join(root, "train.py"))
-	assert.FileExists(t, filepath.Join(root, "pkg", "mod.py"))
+	// The user's tree is staged under its <dirName> subdir; the generated files are
+	// at the bundle root, and code_source_path points at the subdir.
+	assert.FileExists(t, filepath.Join(root, "src", "train.py"))
+	assert.FileExists(t, filepath.Join(root, "src", "pkg", "mod.py"))
 	assert.FileExists(t, filepath.Join(root, "databricks.yml"))
 	assert.FileExists(t, filepath.Join(root, bundleCommandScript))
+	body, err := os.ReadFile(filepath.Join(root, "databricks.yml"))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "code_source_path: ./src")
+
+	// With a code_source, command.sh cd's to $CODE_SOURCE_PATH (the extracted tarball).
+	script, err := os.ReadFile(filepath.Join(root, bundleCommandScript))
+	require.NoError(t, err)
+	assert.Equal(t, commandScript("python train.py", true), string(script))
 }
 
-func TestWriteBundleProjectCommandShadowProtection(t *testing.T) {
-	// A command.sh in the user's tree must not shadow the one we generate from the
-	// run's command: the artifact writes happen after the tree copy.
-	src := t.TempDir()
+func TestWriteBundleProjectCommandNotShadowed(t *testing.T) {
+	// A command.sh in the user's tree is staged under the code subdir and cannot
+	// shadow the generated one at the bundle root.
+	src := filepath.Join(t.TempDir(), "src")
+	require.NoError(t, os.MkdirAll(src, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(src, bundleCommandScript), []byte("STALE"), 0o644))
 
 	configPath := writeConfigFile(t, "train.yaml", minimalConfig+`
@@ -92,18 +103,24 @@ code_source:
 	// minimalConfig's command is "python train.py", not the STALE tree copy.
 	script, err := os.ReadFile(filepath.Join(root, bundleCommandScript))
 	require.NoError(t, err)
-	assert.Equal(t, commandScript("python train.py"), string(script))
+	assert.Equal(t, commandScript("python train.py", true), string(script))
 }
 
 func TestWriteBundleProjectRejectsUnconvertible(t *testing.T) {
-	// A gate failure (here: a $CODE_SOURCE_PATH command) surfaces before any temp
-	// directory is created.
+	// A gate failure (here: a git-pinned code_source, which the working-tree tarball
+	// can't represent) surfaces before any temp directory is created.
 	configPath := writeConfigFile(t, "train.yaml", `
 experiment_name: exp
-command: cd $CODE_SOURCE_PATH && python train.py
+command: python train.py
 compute:
   accelerator_type: GPU_1xA10
   num_accelerators: 1
+code_source:
+  type: snapshot
+  snapshot:
+    root_path: src
+    git:
+      commit: abc123
 `)
 	cfg, err := loadRunConfig(configPath)
 	require.NoError(t, err)

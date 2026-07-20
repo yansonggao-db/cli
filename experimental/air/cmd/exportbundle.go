@@ -15,21 +15,11 @@ import (
 //
 // checkBundleConvertible rejects configs a bundle cannot represent faithfully:
 // train.yaml and a bundle are not 1:1, and some run fields have no bundle
-// equivalent or assume the AIR run harness (e.g. $CODE_SOURCE_PATH) a bundle does
-// not provide.
+// equivalent (e.g. docker_image, usage_policy, a git-pinned code_source).
 
 // bundleCommandScript is the entrypoint filename the emitted bundle references and
 // that `bundle sync` uploads alongside the user's code.
 const bundleCommandScript = "command.sh"
-
-// codeSourcePathVar is the environment variable the AIR run harness sets to the
-// extracted snapshot directory. A bundle delivers code via `bundle sync` and never
-// sets it, so the gate rejects commands relying on it.
-const codeSourcePathVar = "$CODE_SOURCE_PATH"
-
-// workspaceFilePathRef is the bundle variable that resolves to where `bundle
-// deploy` syncs this folder; the emitted command_path points under it.
-const workspaceFilePathRef = "${workspace.file_path}"
 
 // aiRuntimeEnvVarsKey links the task's environment_variables_key to the single
 // job-level env-var profile the converter emits.
@@ -58,29 +48,16 @@ func checkBundleConvertible(cfg *runConfig) error {
 		reasons = append(reasons, "usage_policy_id: budget policy binding is not represented on the ai_runtime_task bundle path yet")
 	}
 
-	// code_source snapshots are delivered by uploading the working tree as an
-	// immutable-folder snapshot (see writeBundleProject). Two sub-cases can't be
-	// represented that way:
+	// The aicode mutator tarballs the local working tree to Workspace Files; a git
+	// pin or a Volume destination can't be represented that way.
 	if cfg.CodeSource != nil && cfg.CodeSource.Snapshot != nil {
 		snap := cfg.CodeSource.Snapshot
-		// git ref: the snapshot uploads the live working tree; it cannot pin to a
-		// commit or fetch a remote branch. Dropping the pin would change what runs.
 		if snap.Git != nil {
-			reasons = append(reasons, "code_source.snapshot.git: the immutable-folder snapshot uploads the working tree and cannot pin a git commit or fetch a remote branch")
+			reasons = append(reasons, "code_source.snapshot.git: the code snapshot tarballs the working tree and cannot pin a git commit or fetch a remote branch")
 		}
-		// remote_volume: the immutable-folder snapshot uploads to Workspace Files
-		// only, not a UC Volume.
 		if snap.RemoteVolume != nil {
-			reasons = append(reasons, "code_source.snapshot.remote_volume: the immutable-folder snapshot uploads to Workspace Files, not a UC Volume")
+			reasons = append(reasons, "code_source.snapshot.remote_volume: the code snapshot uploads to Workspace Files, not a UC Volume")
 		}
-	}
-
-	// A command that reads $CODE_SOURCE_PATH assumes the AIR run harness, which a
-	// bundle does not provide; the synced code lives under ${workspace.file_path}.
-	if cfg.Command != nil && strings.Contains(*cfg.Command, codeSourcePathVar) {
-		reasons = append(reasons, fmt.Sprintf(
-			"command references %s, which only exists on the `air run` path; a bundle syncs code to %s instead",
-			codeSourcePathVar, workspaceFilePathRef))
 	}
 
 	if len(reasons) == 0 {
@@ -95,21 +72,12 @@ func checkBundleConvertible(cfg *runConfig) error {
 // name plus one job with a single ai_runtime_task. It marshals to YAML, so field
 // order here is the emitted key order.
 type exportedBundle struct {
-	Bundle       bundleBlock            `yaml:"bundle"`
-	Resources    exportedResourcesBlock `yaml:"resources"`
-	Experimental *exportedExperimental  `yaml:"experimental,omitempty"`
+	Bundle    bundleBlock            `yaml:"bundle"`
+	Resources exportedResourcesBlock `yaml:"resources"`
 }
 
 type bundleBlock struct {
 	Name string `yaml:"name"`
-}
-
-// exportedExperimental carries experimental.immutable_folder. air run uploads the
-// synced code as a single content-addressed snapshot (/api/2.0/repos/snapshots)
-// rather than per-file — the mechanism that mirrors AIR's own zip-and-fingerprint
-// model. Requires the direct deployment engine, which the run path uses.
-type exportedExperimental struct {
-	ImmutableFolder bool `yaml:"immutable_folder"`
 }
 
 type exportedResourcesBlock struct {
@@ -158,10 +126,14 @@ type exportedEnvVarProfile struct {
 }
 
 type exportedAiRuntimeTask struct {
-	Experiment                string               `yaml:"experiment"`
-	MlflowRun                 string               `yaml:"mlflow_run,omitempty"`
-	MlflowExperimentDirectory string               `yaml:"mlflow_experiment_directory,omitempty"`
-	Deployments               []exportedDeployment `yaml:"deployments"`
+	Experiment                string `yaml:"experiment"`
+	MlflowRun                 string `yaml:"mlflow_run,omitempty"`
+	MlflowExperimentDirectory string `yaml:"mlflow_experiment_directory,omitempty"`
+	// CodeSourcePath is the local code directory (relative to the bundle root); the
+	// aicode mutator tarballs it and rewrites this to the remote path. Omitted when
+	// the run has no code_source.
+	CodeSourcePath string               `yaml:"code_source_path,omitempty"`
+	Deployments    []exportedDeployment `yaml:"deployments"`
 }
 
 type exportedDeployment struct {
@@ -201,9 +173,8 @@ const databricksAIBaseEnvironment = "workspace-base-environments/"
 // convertToBundle maps a convertible runConfig to the emitted bundle, assuming
 // checkBundleConvertible has already passed. command_path is emitted as a path
 // relative to the bundle root; the bundle's translate_paths mutator rewrites it to
-// the deployed location (for immutable_folder, under the content-addressed
-// snapshot). Emitting ${workspace.file_path} directly would instead be validated as
-// a local file and fail.
+// the deployed (synced) location. Emitting ${workspace.file_path} directly would
+// instead be validated as a local file and fail.
 func convertToBundle(cfg *runConfig) *exportedBundle {
 	task := exportedAiRuntimeTask{
 		Experiment: cfg.ExperimentName,
@@ -216,6 +187,11 @@ func convertToBundle(cfg *runConfig) *exportedBundle {
 				AcceleratorCount: cfg.Compute.NumAccelerators,
 			},
 		}},
+	}
+	// Point code_source_path at the staged code subdir; the aicode mutator packages
+	// it and rewrites this to the remote path.
+	if dir := codeSourceDirName(cfg); dir != "" {
+		task.CodeSourcePath = "./" + dir
 	}
 	if cfg.MLflowRunName != nil {
 		task.MlflowRun = *cfg.MLflowRunName
@@ -257,8 +233,26 @@ func convertToBundle(cfg *runConfig) *exportedBundle {
 				},
 			},
 		},
-		Experimental: &exportedExperimental{ImmutableFolder: true},
 	}
+}
+
+// codeSourceDirName returns the code subdir name (the tarball prefix), or "" when
+// the run has no code_source.
+func codeSourceDirName(cfg *runConfig) string {
+	if cfg.CodeSource == nil || cfg.CodeSource.Snapshot == nil {
+		return ""
+	}
+	return dirNameForRoot(cfg.CodeSource.Snapshot.RootPath)
+}
+
+// dirNameForRoot is the basename of root_path, falling back to "code" for ".", "/"
+// or "" so the code is always staged in its own subdir, never the bundle root.
+func dirNameForRoot(rootPath string) string {
+	base := filepath.Base(strings.TrimRight(rootPath, "/"))
+	if base == "." || base == "/" || base == "" {
+		return "code"
+	}
+	return base
 }
 
 // exportedPermissions maps the run's permissions block to job ACL grants, or nil
