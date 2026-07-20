@@ -12,9 +12,8 @@ import (
 	"github.com/databricks/cli/libs/dyn"
 )
 
-// Validate checks AI Runtime tasks that reference a local code_source_path so
-// that misconfigurations surface at `bundle validate` time with an actionable
-// message, rather than as an obscure failure mid-deploy. It performs no uploads.
+// Validate surfaces local code_source_path misconfigurations at `bundle validate`
+// time rather than mid-deploy. It performs no uploads.
 func Validate() bundle.ReadOnlyMutator {
 	return &validate{}
 }
@@ -47,16 +46,14 @@ func (v *validate) Apply(ctx context.Context, b *bundle.Bundle) diag.Diagnostics
 }
 
 func (v *validate) validateTask(b *bundle.Bundle, jobHasGitSource bool, codeSourcePath string, codePath dyn.Path) diag.Diagnostics {
-	// Only local code_source_path values are packaged at deploy; remote values
-	// are used as-is and need no validation here.
+	// Only local values are packaged; remote ones are used as-is.
 	if codeSourcePath == "" || !libraries.IsLocalPath(codeSourcePath) {
 		return nil
 	}
 
 	locations := b.Config.GetLocations(codePath.String())
 
-	// The deploy engine retrieves task files from git when git_source is set, so
-	// packaging a local directory would be silently ignored. Reject the combination.
+	// git_source retrieves task files from git, so a local directory would be ignored.
 	if jobHasGitSource {
 		return diag.Diagnostics{{
 			Severity:  diag.Error,
@@ -67,8 +64,7 @@ func (v *validate) validateTask(b *bundle.Bundle, jobHasGitSource bool, codeSour
 		}}
 	}
 
-	// Immutable-folder deployments upload a single content-addressed snapshot and
-	// do not support the per-task code packaging this mutator performs.
+	// Immutable-folder uploads one snapshot and doesn't support per-task packaging.
 	if b.IsImmutableFolder() {
 		return diag.Diagnostics{{
 			Severity:  diag.Error,

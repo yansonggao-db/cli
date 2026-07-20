@@ -16,32 +16,18 @@ import (
 	"github.com/databricks/cli/libs/vfs"
 )
 
-// tarEpoch is a fixed modification time stamped on every tar entry so the archive
-// is content-addressed: identical file contents always produce identical bytes
-// (and therefore an identical SHA-256), regardless of file mtimes or when the
-// archive was built. This is what lets an unchanged code directory resolve to the
-// same uploaded filename across deploys and skip re-upload. The technique mirrors
-// bundle/deploy/snapshot/path.go (which does the same for the immutable-folder zip).
+// tarEpoch is stamped on every entry so identical content yields identical bytes
+// (and SHA-256) regardless of mtimes, which is what makes the archive content-addressed.
 var tarEpoch = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// appleDoublePrefix is the basename prefix of macOS AppleDouble metadata files.
-// The AIR CLI excludes these; we match it so archives are identical on macOS and Linux.
+// appleDoublePrefix marks macOS AppleDouble metadata files, excluded to match the AIR CLI.
 const appleDoublePrefix = "._"
 
-// buildCodeSnapshot writes a reproducible gzipped tarball of the given files to out
-// and returns its SHA-256 hex digest. syncRoot is the root the files' Relative paths
-// are against (the bundle sync root); relBase is the code directory relative to that
-// root; prefix is the archive's top-level directory name. Each file at
-// "<relBase>/<rest>" is written to the archive as "<prefix>/<rest>", so the archive
-// expands to <prefix>/... — matching the runtime's /databricks/code_source/<dir>
-// extraction contract.
-//
-// The file list is produced by the bundle's sync walker, so it honors .gitignore
-// (including nested files) and the top-level sync.include/exclude globs — the same
-// filtering as bundle file sync.
+// buildCodeSnapshot writes a reproducible gzipped tarball of files to out and returns
+// its SHA-256. Each file at "<relBase>/<rest>" becomes "<prefix>/<rest>", so the archive
+// expands to <prefix>/... matching the runtime's /databricks/code_source/<dir> contract.
 func buildCodeSnapshot(syncRoot vfs.Path, relBase string, files []fileset.File, prefix string, out io.Writer) (string, error) {
-	// Sort by relative path so the archive byte stream (and thus its hash) does not
-	// depend on iteration order.
+	// Sort by relative path so the byte stream (and hash) is order-independent.
 	slices.SortFunc(files, func(a, b fileset.File) int {
 		return strings.Compare(a.Relative, b.Relative)
 	})
@@ -66,15 +52,12 @@ func buildCodeSnapshot(syncRoot vfs.Path, relBase string, files []fileset.File, 
 }
 
 func addFileToArchive(tw *tar.Writer, syncRoot vfs.Path, relBase string, f fileset.File, prefix string) error {
-	// f.Relative is relative to syncRoot and slash-separated. Re-base it under the
-	// code directory so the entry nests under the archive prefix.
+	// Re-base f.Relative (relative to syncRoot) under the code dir so it nests under prefix.
 	rel := f.Relative
 	if relBase != "." {
 		trimmed, ok := strings.CutPrefix(rel, relBase+"/")
 		if !ok {
-			// Not under the code dir; the sync file list is scoped to it, so this
-			// should not happen, but skip defensively rather than mis-place a file.
-			return nil
+			return nil // outside the code dir; the file list is scoped to it, so skip defensively
 		}
 		rel = trimmed
 	}
@@ -94,8 +77,7 @@ func addFileToArchive(tw *tar.Writer, syncRoot vfs.Path, relBase string, f files
 		return fmt.Errorf("stat %s: %w", f.Relative, err)
 	}
 
-	// Only regular files are archived. The walker never yields directories, and
-	// symlinks inside a code snapshot are out of scope.
+	// Only regular files are archived (symlinks are out of scope).
 	if !info.Mode().IsRegular() {
 		return nil
 	}
@@ -104,9 +86,7 @@ func addFileToArchive(tw *tar.Writer, syncRoot vfs.Path, relBase string, f files
 		Typeflag: tar.TypeReg,
 		Name:     path.Join(prefix, rel),
 		Size:     info.Size(),
-		// Normalize permissions and zero the mtime so the archive is reproducible
-		// across machines. The runtime invokes code via an interpreter, not by
-		// executing files from the snapshot, so execute bits are not preserved.
+		// Fixed mode + mtime for reproducibility; code runs via an interpreter, so exec bits don't matter.
 		Mode:    0o644,
 		ModTime: tarEpoch,
 	}

@@ -1,19 +1,7 @@
-// Package aicode packages a local code directory referenced by an AI Runtime
-// task's code_source_path and uploads it to the workspace during deploy.
-//
-// The SDK jobs.AiRuntimeTask.code_source_path field expects a workspace or UC
-// volume path to an uploaded code archive; its doc comment states that the CLI
-// is responsible for packaging the user's local code directory into that
-// archive. This mutator implements that contract for DABs: when a user points
-// code_source_path at a local directory, it packages the directory into a
-// reproducible tarball (.git and gitignored files excluded), uploads the archive
-// to the user's workspace code snapshot directory, and rewrites the field to the
-// resulting remote path so the deployed job runs against the uploaded code. Values
-// that are already remote are left untouched.
-//
-// The archive is content-addressed: its name embeds the SHA-256 of the
-// (reproducible) tarball, so an unchanged code directory resolves to the same
-// remote path across deploys and re-uploads are skipped (see snapshot_package.go).
+// Package aicode packages a local code_source_path directory into a
+// content-addressed tarball at deploy, uploads it to the user's workspace, and
+// rewrites code_source_path to the remote archive. Already-remote values are left
+// untouched. The archive name embeds its SHA-256, so unchanged code skips re-upload.
 package aicode
 
 import (
@@ -37,8 +25,7 @@ import (
 	libsync "github.com/databricks/cli/libs/sync"
 )
 
-// codeSourcePatterns are the config locations of an AI Runtime task's
-// code_source_path, both as a direct task and nested under a for_each_task.
+// codeSourcePatterns locate code_source_path on a direct task and under a for_each_task.
 var codeSourcePatterns = []dyn.Pattern{
 	dyn.NewPattern(
 		dyn.Key("resources"), dyn.Key("jobs"), dyn.AnyKey(),
@@ -57,8 +44,7 @@ var codeSourcePatterns = []dyn.Pattern{
 type codeSource struct {
 	configPath dyn.Path
 	location   dyn.Location
-	// value is the raw code_source_path string as written in config.
-	value string
+	value      string // raw code_source_path string as written in config
 }
 
 func PackageAndUpload() bundle.Mutator {
@@ -66,10 +52,7 @@ func PackageAndUpload() bundle.Mutator {
 }
 
 type packageAndUpload struct {
-	// client is the filer used for uploads. When nil (the normal case) a filer
-	// rooted at the code snapshot cache is built per code source. It is only set
-	// in tests, to inject a recording filer.
-	client filer.Filer
+	client filer.Filer // nil in normal use (a filer is built per code source); set only in tests
 }
 
 func (m *packageAndUpload) Name() string {
@@ -90,9 +73,8 @@ func (m *packageAndUpload) Apply(ctx context.Context, b *bundle.Bundle) diag.Dia
 		return diags.Extend(diag.FromErr(err))
 	}
 
-	// remotePaths maps each config location to the remote archive path it should
-	// point to after upload. Built outside the Mutate closure so upload failures
-	// are reported before any config is rewritten.
+	// Upload all sources before rewriting any config, so an upload failure leaves
+	// the config untouched.
 	remotePaths := make(map[string]string, len(sources))
 	for _, cs := range sources {
 		remote, err := m.packageOne(ctx, b, cs, userDir)
@@ -120,22 +102,17 @@ func (m *packageAndUpload) Apply(ctx context.Context, b *bundle.Bundle) diag.Dia
 	return diags
 }
 
-// repoSnapshotsSubdir is the per-user workspace location for code snapshots,
-// under the user's home. It matches the Python air CLI (and PR #5897) and is
-// deliberately NOT <artifact_path>/.internal, which artifacts.CleanUp() deletes at
-// the start of every deploy.
+// repoSnapshotsSubdir holds code snapshots under the user's home. Deliberately not
+// <artifact_path>/.internal, which artifacts.CleanUp() wipes each deploy (matches the Python air CLI).
 const repoSnapshotsSubdir = ".air/repo_snapshots"
 
-// packageOne packages the local directory for a single code source into a
-// reproducible tarball, uploads it to the user's repo_snapshots dir (skipping the
-// upload when a content-identical archive already exists there), and returns the
-// remote path the config should point to.
+// packageOne tarballs one code source, uploads it to repo_snapshots (skipping the
+// upload when a content-identical archive is already there), and returns its remote path.
 func (m *packageAndUpload) packageOne(ctx context.Context, b *bundle.Bundle, cs codeSource, userDir string) (string, error) {
 	localDir := filepath.Join(b.SyncRootPath, filepath.FromSlash(cs.value))
 	dirName := filepath.Base(localDir)
 
-	// relBase is the code directory relative to the sync root, used both to scope the
-	// sync file list to this directory and to re-base archive entry names under it.
+	// relBase scopes the sync file list to the code dir and re-bases archive entries under it.
 	relBase, err := filepath.Rel(b.SyncRootPath, localDir)
 	if err != nil {
 		return "", fmt.Errorf("code_source_path %q: %w", cs.value, err)
@@ -156,8 +133,7 @@ func (m *packageAndUpload) packageOne(ctx context.Context, b *bundle.Bundle, cs 
 		}
 	}
 
-	// Build the archive in memory so its content hash can name the upload; the hash
-	// is computed while gzipping, so this adds no extra pass over the files.
+	// Build in memory so the content hash (computed while gzipping) can name the upload.
 	var buf bytes.Buffer
 	sha, err := buildCodeSnapshot(b.SyncRoot, relBase, files, dirName, &buf)
 	if err != nil {
@@ -165,14 +141,11 @@ func (m *packageAndUpload) packageOne(ctx context.Context, b *bundle.Bundle, cs 
 	}
 
 	archiveName := fmt.Sprintf("%s_%s.tar.gz", dirName, sha[:16])
-	// The AI Runtime snapshot fetcher expects code_source_path in the legacy
-	// "/Users/..." form (no "/Workspace" prefix), matching the Python air CLI. The
-	// filer needs the "/Workspace/Users/..." form to upload, so upload to uploadPath
-	// but record the de-prefixed path on the task.
+	// The AI Runtime fetcher wants the legacy "/Users/..." form (no "/Workspace"), while
+	// the filer uploads via uploadPath; record the de-prefixed path on the task.
 	remotePath := strings.TrimPrefix(path.Join(uploadPath, archiveName), "/Workspace")
 
-	// The archive is reproducible, so a matching name means identical content is
-	// already uploaded: skip the upload and just point the config at it.
+	// A matching name means identical content is already uploaded (the archive is reproducible).
 	if _, err := client.Stat(ctx, archiveName); err == nil {
 		log.Debugf(ctx, "code snapshot already present at %s, skipping upload", remotePath)
 		return remotePath, nil
@@ -186,24 +159,18 @@ func (m *packageAndUpload) packageOne(ctx context.Context, b *bundle.Bundle, cs 
 	return remotePath, nil
 }
 
-// codeSourceFiles returns the files under the code directory (relBase, relative to
-// the sync root) that should go into the snapshot. It reuses the bundle's sync
-// options so the file list is filtered exactly like bundle file sync: .gitignore
-// aware, plus the top-level sync.include/exclude globs. Scoping Paths to relBase
-// restricts the walk (and the returned relative paths) to the code directory.
+// codeSourceFiles lists the files under relBase (relative to the sync root) for the
+// snapshot, filtered like bundle file sync: .gitignore-aware plus sync.include/exclude.
 func codeSourceFiles(ctx context.Context, b *bundle.Bundle, relBase string) ([]fileset.File, error) {
 	opts, err := files.GetSyncOptions(ctx, b)
 	if err != nil {
 		return nil, err
 	}
-	// Scope the file list to the code directory (relBase) while keeping the
-	// bundle's include/exclude globs, so filtering matches bundle file sync.
 	opts.Paths = []string{relBase}
 	return libsync.GetFileList(ctx, *opts)
 }
 
-// userWorkspaceHome returns the current user's workspace home directory
-// (/Workspace/Users/<user>), the root under which code snapshots are stored.
+// userWorkspaceHome returns /Workspace/Users/<user>, the root for code snapshots.
 func userWorkspaceHome(b *bundle.Bundle) (string, error) {
 	u := b.Config.Workspace.CurrentUser
 	if u == nil || u.User == nil || u.UserName == "" {

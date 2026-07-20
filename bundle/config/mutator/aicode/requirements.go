@@ -15,34 +15,25 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// requirementsFileName is the file the AI Runtime entry script reads from the
-// command_path directory to install the workload's pip dependencies. The server
-// derives its path from command_path, so it must sit next to command.sh.
+// requirementsFileName is read by the AI Runtime entry script from the command_path
+// directory, so it must sit next to command.sh.
 const requirementsFileName = "requirements.yaml"
 
-// requirementsSpec is the requirements.yaml shape the AI Runtime consumes: a
-// client image version and a list of pip requirement lines. It mirrors what the
-// Python air CLI synthesizes.
+// requirementsSpec is the requirements.yaml shape the AI Runtime consumes.
 type requirementsSpec struct {
 	Version      string   `yaml:"version,omitempty"`
 	Dependencies []string `yaml:"dependencies,omitempty"`
 }
 
-// SynthesizeRequirements uploads a requirements.yaml next to each AI Runtime task's
-// command_path, derived from the job-level serverless environment referenced by the
-// task's environment_key. The AI Runtime entry script reads this file (resolved
-// from command_path's directory) to set up the workload environment; without it the
-// run fails during setup. It runs at deploy time, after command_path has been
-// translated to its absolute workspace path.
+// SynthesizeRequirements uploads requirements.yaml next to each AI Runtime task's
+// command_path, derived from the task's serverless environment. Runs after
+// command_path has been translated to its absolute workspace path.
 func SynthesizeRequirements() bundle.Mutator {
 	return &synthesizeRequirements{}
 }
 
 type synthesizeRequirements struct {
-	// client is the filer used for uploads, keyed by the command_path directory.
-	// When nil (normal case) a workspace filer is built per directory; only set in
-	// tests to inject a recording filer.
-	client filer.Filer
+	client filer.Filer // nil in normal use (a filer is built per directory); set only in tests
 }
 
 func (m *synthesizeRequirements) Name() string {
@@ -68,9 +59,8 @@ func (m *synthesizeRequirements) Apply(ctx context.Context, b *bundle.Bundle) di
 	return diags
 }
 
-// synthesizeForTask uploads requirements.yaml next to task's command_path. It is a
-// no-op when the task has no deployment command_path or no matching environment
-// spec (the run can still supply deps another way, so this is not an error).
+// synthesizeForTask uploads requirements.yaml next to task's command_path; a no-op
+// when there's no command_path or matching environment (deps can come from elsewhere).
 func (m *synthesizeRequirements) synthesizeForTask(ctx context.Context, b *bundle.Bundle, jobName string, task *jobs.Task, envs map[string]*compute.Environment) error {
 	if len(task.AiRuntimeTask.Deployments) == 0 {
 		return nil
@@ -96,8 +86,7 @@ func (m *synthesizeRequirements) synthesizeForTask(ctx context.Context, b *bundl
 		return err
 	}
 
-	// command_path is an absolute workspace path (translated during initialize); the
-	// entry script reads requirements.yaml from its directory.
+	// The entry script reads requirements.yaml from command_path's directory.
 	dir := path.Dir(commandPath)
 	client := m.client
 	if client == nil {
@@ -114,9 +103,7 @@ func (m *synthesizeRequirements) synthesizeForTask(ctx context.Context, b *bundl
 	return nil
 }
 
-// renderRequirements builds the requirements.yaml content from a serverless
-// environment spec: version from environment_version (or the legacy client field),
-// dependencies from its pip dependency list.
+// renderRequirements builds requirements.yaml from a serverless environment spec.
 func renderRequirements(env *compute.Environment) ([]byte, error) {
 	version := env.EnvironmentVersion
 	if version == "" {
