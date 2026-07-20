@@ -141,31 +141,38 @@ func applyChange(ctx context.Context, content []byte, fieldChange FieldChange) (
 
 	// A replace whose target is absent from every candidate path (the field or
 	// its parent chain is missing) cannot replace anything. The remote value
-	// still needs to land in config, which is an add, so retry as one against
-	// the canonical (first) candidate and feed the missing-parent retry below.
+	// still needs to land in config, which is an add, so retry each candidate as
+	// an add. Trying every candidate matters when the resource lives only under a
+	// target: the first candidate ("resources...") has no parent, but the
+	// target-prefixed one does, so adding to it keeps the value in the target
+	// block instead of leaking a spurious top-level resources entry. Candidates
+	// whose parent is also missing feed the nested-structure retry below.
 	if !success && fieldChange.Change.Operation == OperationReplace && isPathNotFoundError(firstErr) {
-		jsonPointer, err := strPathToJSONPointer(fieldChange.FieldCandidates[0])
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert field path %q to JSON pointer: %w", fieldChange.FieldCandidates[0], err)
-		}
-		path, err := yamlpatch.ParsePath(jsonPointer)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse JSON Pointer %s: %w", jsonPointer, err)
-		}
-		patcher := gopkgv3yamlpatcher.New(gopkgv3yamlpatcher.IndentSpaces(2))
-		modifiedContent, patchErr := patcher.Apply(content, yamlpatch.Patch{yamlpatch.Operation{
-			Type:  yamlpatch.OperationAdd,
-			Path:  path,
-			Value: fieldChange.Change.Value,
-		}})
-		switch {
-		case patchErr == nil:
-			content = modifiedContent
-			success = true
-			firstErr = nil
-		case isParentPathError(patchErr):
-			if missingPath, extractErr := extractMissingPath(patchErr); extractErr == nil {
-				parentNodesToCreate = append(parentNodesToCreate, parentNode{path, missingPath})
+		for _, fieldPathCandidate := range fieldChange.FieldCandidates {
+			jsonPointer, err := strPathToJSONPointer(fieldPathCandidate)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert field path %q to JSON pointer: %w", fieldPathCandidate, err)
+			}
+			path, err := yamlpatch.ParsePath(jsonPointer)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse JSON Pointer %s: %w", jsonPointer, err)
+			}
+			patcher := gopkgv3yamlpatcher.New(gopkgv3yamlpatcher.IndentSpaces(2))
+			modifiedContent, patchErr := patcher.Apply(content, yamlpatch.Patch{yamlpatch.Operation{
+				Type:  yamlpatch.OperationAdd,
+				Path:  path,
+				Value: fieldChange.Change.Value,
+			}})
+			if patchErr == nil {
+				content = modifiedContent
+				success = true
+				firstErr = nil
+				break
+			}
+			if isParentPathError(patchErr) {
+				if missingPath, extractErr := extractMissingPath(patchErr); extractErr == nil {
+					parentNodesToCreate = append(parentNodesToCreate, parentNode{path, missingPath})
+				}
 			}
 		}
 	}

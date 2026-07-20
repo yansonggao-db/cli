@@ -79,6 +79,7 @@ func TestApplyChangeMissingTarget(t *testing.T) {
 		value      any
 		candidates []string
 		wantAdded  string // substring expected in the result (empty for remove no-op)
+		wantAbsent string // substring that must NOT appear in the result
 	}{
 		{
 			name: "replace field whose /resources parent is absent",
@@ -95,6 +96,29 @@ targets:
 			value:      "targets.dev.resources.jobs.my_job.max_concurrent_runs",
 			candidates: []string{"resources.jobs.my_job.max_concurrent_runs"},
 			wantAdded:  "resources:",
+		},
+		{
+			// A target-only resource: the "resources..." candidate has no parent,
+			// but the target-prefixed one does, so the add must land in the target
+			// block rather than creating a spurious top-level resources entry.
+			name: "replace prefers the candidate whose parent exists",
+			content: `bundle:
+  name: x
+targets:
+  dev:
+    resources:
+      jobs:
+        my_job:
+          name: J
+`,
+			op:    OperationReplace,
+			value: "added",
+			candidates: []string{
+				"resources.jobs.my_job.description",
+				"targets.dev.resources.jobs.my_job.description",
+			},
+			wantAdded:  "description: added",
+			wantAbsent: "\nresources:",
 		},
 		{
 			name: "replace key absent from an existing parent",
@@ -138,6 +162,9 @@ targets:
 				assert.Equal(t, tt.content, string(got))
 			} else {
 				assert.Contains(t, string(got), tt.wantAdded)
+			}
+			if tt.wantAbsent != "" {
+				assert.NotContains(t, string(got), tt.wantAbsent)
 			}
 		})
 	}
