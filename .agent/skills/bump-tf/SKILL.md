@@ -38,7 +38,6 @@ go build ./...
 A `Warning: Skipping file generation for databricks_quality_monitor ...` line from codegen is expected.
 If `generate-tf-schema` fails with `no available releases match the given constraints {version}`, the registry hasn't indexed the release yet.
 See [registry-workaround.md](registry-workaround.md), then continue.
-(Uncommon; only for a release published in the last few hours.)
 
 **4. Refresh goldens, then VERIFY.**
 
