@@ -3,7 +3,7 @@
 `./task generate-tf-schema` runs the codegen tool, which runs `terraform init`.
 That pulls the provider from the **Terraform Registry** (`registry.terraform.io`),
 **not** from GitHub. A freshly published GitHub release is not indexed by the
-registry immediately — indexing lags the GitHub release by anywhere from ~30 min to
+registry immediately. Indexing lags the GitHub release by anywhere from ~30 min to
 a few hours.
 
 You only need this workaround if `./task generate-tf-schema` fails with:
@@ -53,7 +53,7 @@ generate-tf-schema` without the mirror once the registry catches up, if you pref
 for a different platform, e.g. `darwin_arm64`.
 
 Codegen still fetches the real GitHub SHA256 checksums for `root.go`, so nothing is
-faked — the mirror only shortcuts the registry version lookup.
+faked. The mirror only shortcuts the registry version lookup.
 
 Clean up the mirror when the bump is done:
 

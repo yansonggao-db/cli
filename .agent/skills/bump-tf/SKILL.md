@@ -8,18 +8,18 @@ allowed-tools: Read, Edit, Write, Bash, Glob, Grep, AskUserQuestion
 # Bump Terraform Provider
 
 The pinned provider version lives in `bundle/internal/tf/codegen/schema/version.go`.
-Everything else — `bundle/internal/tf/schema/*` (incl. `root.go`) and
-`bundle/terraform_dabs_map/generated.go` — is generated from it, so the only file you
+Everything else (`bundle/internal/tf/schema/*` including `root.go`, and
+`bundle/terraform_dabs_map/generated.go`) is generated from it, so the only file you
 hand-edit for the bump itself is `version.go`. Do not edit the generated files, and do
 not touch the `databricks-tf-provider/...` version comment in
-`libs/testdiff/replacement.go` (the version is masked in acceptance output; changing it
-is pure noise).
+`libs/testdiff/replacement.go` (the version is masked in acceptance output, so changing
+it is pure noise).
 
 ## Steps
 
 **1. Resolve the target version.** Use the version the user gave (strip a leading `v`).
 For "latest"/no version, resolve the newest GitHub release. Either way, confirm the tag
-exists on GitHub — you can't bump to an unreleased version:
+exists on GitHub, since you can't bump to an unreleased version:
 
 ```bash
 gh api repos/databricks/terraform-provider-databricks/releases --jq '.[0].tag_name'   # latest
@@ -40,7 +40,7 @@ go build ./...
 
 A `Warning: Skipping file generation for databricks_quality_monitor ...` line from
 codegen is expected. If `generate-tf-schema` fails with `no available releases match the
-given constraints {version}`, the registry hasn't indexed the release yet — see
+given constraints {version}`, the registry hasn't indexed the release yet. See
 [registry-workaround.md](registry-workaround.md), then continue. (Uncommon; only for a
 release published in the last few hours.)
 
@@ -56,8 +56,8 @@ The verify pass is not optional. Bundle tests run under an `EnvMatrix` of both e
 succeeds, the variants produce different output; `-update` runs both and each overwrites
 the other's `output.txt`, so it can silently settle on the passing variant and report
 `ok` while the golden is actually wrong. Only the non-update run catches this. (Ignore
-`rejecting_proxy.go: blocking proxy` log lines — normal. A test that times out under full
-parallel load but passes when run alone is a flake, not a regression.)
+`rejecting_proxy.go: blocking proxy` log lines, which are normal. A test that times out
+under full parallel load but passes when run alone is a flake, not a regression.)
 
 **5. Resolve behavior changes** if the verify pass fails. Diff the generated schema
 (`git diff bundle/internal/tf/schema/resource_<x>.go`) and adapt the **test**, not the
@@ -88,7 +88,8 @@ Add it without `(#NNNN)` now; backfill the number after the PR exists, then run
 `./task links` to expand it (CI fails on an unexpanded `(#NNNN)`).
 
 **7. Commit, push, PR.** Run `./task fmt` and `./task lint-q` (if either touches
-`acceptance/`, a fixture is wrong — fix the source, don't edit output). Commit and push;
+`acceptance/`, a fixture is wrong, so fix the source rather than editing output). Commit
+and push;
 if the push 403s, the account needs write access to `databricks/cli` (`gh auth switch`).
 Then follow the `pr-checklist` skill for the PR. **Do not run `gh pr create` without the
 user's explicit permission.** Commit body and PR description:
