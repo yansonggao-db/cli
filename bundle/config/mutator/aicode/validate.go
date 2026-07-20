@@ -25,62 +25,71 @@ func (v *validate) Name() string {
 }
 
 func (v *validate) Apply(ctx context.Context, b *bundle.Bundle) diag.Diagnostics {
+	return validateCodeSources(b.Config.Value(), b.SyncRootPath, b.IsImmutableFolder(), b.Config.GetLocations)
+}
+
+// validateCodeSources checks every local code_source_path in root. It reads the dyn
+// value directly (not the typed SDK field, which is a churny private-preview field),
+// so it works regardless of the SDK's typed struct. locations resolves a config path
+// to its source locations for diagnostics.
+func validateCodeSources(root dyn.Value, syncRootPath string, isImmutableFolder bool, locations func(string) []dyn.Location) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	jobsPath := dyn.NewPath(dyn.Key("resources"), dyn.Key("jobs"))
-
-	for name, job := range b.Config.Resources.Jobs {
-		jobPath := jobsPath.Append(dyn.Key(name))
-
-		for i, task := range job.Tasks {
-			if task.AiRuntimeTask == nil {
-				continue
+	for _, pattern := range codeSourcePatterns {
+		_, err := dyn.MapByPattern(root, pattern, func(codePath dyn.Path, cv dyn.Value) (dyn.Value, error) {
+			codeSourcePath, ok := cv.AsString()
+			if !ok {
+				return cv, nil
 			}
-			codePath := jobPath.Append(dyn.Key("tasks"), dyn.Index(i),
-				dyn.Key("ai_runtime_task"), dyn.Key("code_source_path"))
-			diags = diags.Extend(v.validateTask(b, job.GitSource != nil, task.AiRuntimeTask.CodeSourcePath, codePath))
+			diags = diags.Extend(validateTask(root, syncRootPath, isImmutableFolder, locations, codeSourcePath, codePath))
+			return cv, nil
+		})
+		if err != nil {
+			diags = diags.Extend(diag.FromErr(err))
 		}
 	}
 
 	return diags
 }
 
-func (v *validate) validateTask(b *bundle.Bundle, jobHasGitSource bool, codeSourcePath string, codePath dyn.Path) diag.Diagnostics {
+func validateTask(root dyn.Value, syncRootPath string, isImmutableFolder bool, locations func(string) []dyn.Location, codeSourcePath string, codePath dyn.Path) diag.Diagnostics {
 	// Only local values are packaged; remote ones are used as-is.
 	if codeSourcePath == "" || !libraries.IsLocalPath(codeSourcePath) {
 		return nil
 	}
 
-	locations := b.Config.GetLocations(codePath.String())
+	locs := locations(codePath.String())
 
 	// git_source retrieves task files from git, so a local directory would be ignored.
-	if jobHasGitSource {
+	// The job path is code_source_path's path truncated to resources.jobs.<name>.
+	jobPath := codePath[:3]
+	if _, err := dyn.GetByPath(root, jobPath.Append(dyn.Key("git_source"))); err == nil {
 		return diag.Diagnostics{{
 			Severity:  diag.Error,
 			Summary:   "ai_runtime_task with a local code_source_path cannot be combined with git_source",
 			Detail:    "Remove git_source or set code_source_path to a workspace or volume path",
-			Locations: locations,
+			Locations: locs,
 			Paths:     []dyn.Path{codePath},
 		}}
 	}
 
 	// Immutable-folder uploads one snapshot and doesn't support per-task packaging.
-	if b.IsImmutableFolder() {
+	if isImmutableFolder {
 		return diag.Diagnostics{{
 			Severity:  diag.Error,
 			Summary:   "ai_runtime_task with a local code_source_path is not supported with experimental.immutable_folder",
-			Locations: locations,
+			Locations: locs,
 			Paths:     []dyn.Path{codePath},
 		}}
 	}
 
-	localDir := filepath.Join(b.SyncRootPath, filepath.FromSlash(codeSourcePath))
+	localDir := filepath.Join(syncRootPath, filepath.FromSlash(codeSourcePath))
 	info, err := os.Stat(localDir)
 	if err != nil {
 		return diag.Diagnostics{{
 			Severity:  diag.Error,
 			Summary:   fmt.Sprintf("code_source_path %q not found", codeSourcePath),
-			Locations: locations,
+			Locations: locs,
 			Paths:     []dyn.Path{codePath},
 		}}
 	}
@@ -88,7 +97,7 @@ func (v *validate) validateTask(b *bundle.Bundle, jobHasGitSource bool, codeSour
 		return diag.Diagnostics{{
 			Severity:  diag.Error,
 			Summary:   fmt.Sprintf("code_source_path %q must be a directory", codeSourcePath),
-			Locations: locations,
+			Locations: locs,
 			Paths:     []dyn.Path{codePath},
 		}}
 	}
