@@ -10,6 +10,7 @@
 
 ### Bundles
 
+* Fix `bundle config-remote-sync` failing to write back a remote change when the field's parent path or key is absent from the target YAML file ("parent path /resources does not exist", "key ... does not exist and can not be replaced"): a replace now falls back to adding the value (creating any missing parent), and removing an already-absent field is a no-op ([#XXXX](https://github.com/databricks/cli/pull/XXXX)).
 * direct: add basic version of job_runs resource (experimental) ([#5603](https://github.com/databricks/cli/pull/5603)).
 * Fix permissions added to a job or pipeline by a Python (PyDABs) mutator failing to deploy with "must have exactly one owner"; the deploying identity is now set as owner, matching resources whose permissions are declared in YAML ([#5821](https://github.com/databricks/cli/pull/5821)).
 * Remove duplicate enum values for jsonschema.json ([#5839](https://github.com/databricks/cli/pull/5839)).

@@ -139,6 +139,37 @@ func applyChange(ctx context.Context, content []byte, fieldChange FieldChange) (
 		}
 	}
 
+	// A replace whose target is absent from every candidate path (the field or
+	// its parent chain is missing) cannot replace anything. The remote value
+	// still needs to land in config, which is an add, so retry as one against
+	// the canonical (first) candidate and feed the missing-parent retry below.
+	if !success && fieldChange.Change.Operation == OperationReplace && isPathNotFoundError(firstErr) {
+		jsonPointer, err := strPathToJSONPointer(fieldChange.FieldCandidates[0])
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert field path %q to JSON pointer: %w", fieldChange.FieldCandidates[0], err)
+		}
+		path, err := yamlpatch.ParsePath(jsonPointer)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse JSON Pointer %s: %w", jsonPointer, err)
+		}
+		patcher := gopkgv3yamlpatcher.New(gopkgv3yamlpatcher.IndentSpaces(2))
+		modifiedContent, patchErr := patcher.Apply(content, yamlpatch.Patch{yamlpatch.Operation{
+			Type:  yamlpatch.OperationAdd,
+			Path:  path,
+			Value: fieldChange.Change.Value,
+		}})
+		switch {
+		case patchErr == nil:
+			content = modifiedContent
+			success = true
+			firstErr = nil
+		case isParentPathError(patchErr):
+			if missingPath, extractErr := extractMissingPath(patchErr); extractErr == nil {
+				parentNodesToCreate = append(parentNodesToCreate, parentNode{path, missingPath})
+			}
+		}
+	}
+
 	// If all attempts failed with parent path errors, try creating nested structures
 	if !success && len(parentNodesToCreate) > 0 {
 		for _, errInfo := range parentNodesToCreate {
@@ -165,8 +196,12 @@ func applyChange(ctx context.Context, content []byte, fieldChange FieldChange) (
 	}
 
 	if firstErr != nil {
-		if (fieldChange.Change.Operation == OperationRemove || fieldChange.Change.Operation == OperationReplace) && isPathNotFoundError(firstErr) {
-			return nil, fmt.Errorf("field not found in YAML configuration: %w", firstErr)
+		// A remove whose target is already absent from this file is a no-op:
+		// the field the remote dropped is not in config to begin with, so leave
+		// the file unchanged rather than failing the whole sync.
+		if fieldChange.Change.Operation == OperationRemove && isPathNotFoundError(firstErr) {
+			log.Debugf(ctx, "Nothing to remove for %s, field not present in YAML", fieldChange.FieldCandidates[0])
+			return content, nil
 		}
 		return nil, fmt.Errorf("failed to apply change: %w", firstErr)
 	}

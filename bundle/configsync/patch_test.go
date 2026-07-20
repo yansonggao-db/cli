@@ -66,6 +66,83 @@ resources:
 	assert.NotContains(t, modified, blankLineMarker)
 }
 
+// A replace/remove whose target field, key, or parent chain is absent from the
+// YAML file must not fail the sync: a replace writes the remote value in (as an
+// add, creating any missing parent), and a remove is a no-op.
+func TestApplyChangeMissingTarget(t *testing.T) {
+	ctx := logdiag.InitContext(t.Context())
+
+	tests := []struct {
+		name       string
+		content    string
+		op         OperationType
+		value      any
+		candidates []string
+		wantAdded  string // substring expected in the result (empty for remove no-op)
+	}{
+		{
+			name: "replace field whose /resources parent is absent",
+			content: `bundle:
+  name: x
+targets:
+  dev:
+    resources:
+      jobs:
+        my_job:
+          max_concurrent_runs: 2
+`,
+			op:         OperationReplace,
+			value:      "targets.dev.resources.jobs.my_job.max_concurrent_runs",
+			candidates: []string{"resources.jobs.my_job.max_concurrent_runs"},
+			wantAdded:  "resources:",
+		},
+		{
+			name: "replace key absent from an existing parent",
+			content: `resources:
+  jobs:
+    my_job:
+      tasks:
+        - task_key: a
+          notebook_task:
+            notebook_path: /a
+`,
+			op:         OperationReplace,
+			value:      "ALL_DONE",
+			candidates: []string{"resources.jobs.my_job.tasks[0].run_if"},
+			wantAdded:  "run_if: ALL_DONE",
+		},
+		{
+			name: "remove field already absent is a no-op",
+			content: `resources:
+  jobs:
+    my_job:
+      name: J
+`,
+			op:         OperationRemove,
+			value:      nil,
+			candidates: []string{"resources.jobs.my_job.max_concurrent_runs"},
+			wantAdded:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := FieldChange{
+				FilePath:        "databricks.yml",
+				Change:          &ConfigChangeDesc{Operation: tt.op, Value: tt.value},
+				FieldCandidates: tt.candidates,
+			}
+			got, err := applyChange(ctx, []byte(tt.content), fc)
+			require.NoError(t, err)
+			if tt.wantAdded == "" {
+				assert.Equal(t, tt.content, string(got))
+			} else {
+				assert.Contains(t, string(got), tt.wantAdded)
+			}
+		})
+	}
+}
+
 // for readability of test cases
 func nl(s string) string {
 	return strings.TrimPrefix(s, "\n")
